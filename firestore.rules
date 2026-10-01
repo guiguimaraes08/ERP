@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Master Gate: Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(ownerId) {
+      return isSignedIn() && request.auth.uid == ownerId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidInventoryItem(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 150
+        && data.sku is string && data.sku.size() > 0 && data.sku.size() <= 64
+        && data.category is string && data.category.size() <= 50
+        && data.currentStock is number && data.currentStock >= 0
+        && data.minStock is number && data.minStock >= 0
+        && data.unit is string && data.unit.size() <= 20
+        && data.unitCost is number && data.unitCost >= 0
+        && data.ownerId is string && data.ownerId == request.auth.uid;
+    }
+
+    function isValidProductionProject(data) {
+      return data.code is string && data.code.size() > 0 && data.code.size() <= 64
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 150
+        && data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 150
+        && data.status is string && data.status.size() <= 50
+        && data.batchSize is number && data.batchSize >= 0
+        && data.salePrice is number && data.salePrice >= 0
+        && data.ownerId is string && data.ownerId == request.auth.uid;
+    }
+
+    match /inventory_items/{itemId} {
+      allow get: if isOwner(resource.data.ownerId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isValidId(itemId) && isSignedIn() && isValidInventoryItem(incoming());
+      allow update: if isValidId(itemId) && isOwner(existing().ownerId) && isValidInventoryItem(incoming())
+        && incoming().ownerId == existing().ownerId;
+      allow delete: if isValidId(itemId) && isOwner(resource.data.ownerId);
+    }
+
+    match /production_projects/{projectId} {
+      allow get: if isOwner(resource.data.ownerId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isValidId(projectId) && isSignedIn() && isValidProductionProject(incoming());
+      allow update: if isValidId(projectId) && isOwner(existing().ownerId) && isValidProductionProject(incoming())
+        && incoming().ownerId == existing().ownerId;
+      allow delete: if isValidId(projectId) && isOwner(resource.data.ownerId);
+    }
+  }
+}

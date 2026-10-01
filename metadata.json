@@ -1,0 +1,8 @@
+{
+  "name": "ForgeFlow Industrial ERP",
+  "description": "Sistema de gestão de produção, inventário, projetos e faturamento para manufatura sob encomenda e impressão 3D com KPIs em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
