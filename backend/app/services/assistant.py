@@ -7,18 +7,28 @@ Precisa de internet e de uma chave da API da Anthropic (Ajustes → Assistente).
 
 import json
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import date
+from typing import Iterator
 
 import anthropic
 
-from . import pricing, schedule
+from . import manual, pricing, schedule
 
 # Modelos oferecidos em Ajustes. O padrão é o mais capaz; a escolha de economizar é do usuário.
 MODELS = {
-    "claude-opus-5-5": {"label": "Claude Opus 5.5 · mais inteligente (padrão)", "effort": True, "fallbacks": True},
-    "claude-sonnet-5-5": {"label": "Claude Sonnet 5.5 · mais rápido e barato", "effort": True, "fallbacks": True},
-    "claude-haiku-4-5": {"label": "Claude Haiku 4.5 · o mais barato", "effort": False, "fallbacks": False},
+    "claude-opus-5-5": {"label": "Claude Opus 5.5 · mais inteligente (padrão)", "provider": "anthropic", "effort": True, "fallbacks": True},
+    "claude-sonnet-5-5": {"label": "Claude Sonnet 5.5 · mais rápido e barato", "provider": "anthropic", "effort": True, "fallbacks": True},
+    "claude-haiku-4-5": {"label": "Claude Haiku 4.5 · o mais barato", "provider": "anthropic", "effort": False, "fallbacks": False},
+    "gemini-2.5-flash": {"label": "Google Gemini 2.5 Flash", "provider": "google", "effort": False, "fallbacks": False},
 }
+# Cada fornecedor guarda a sua chave: trocar de modelo não apaga a do outro.
+PROVIDERS = {
+    "anthropic": {"name": "Anthropic", "setting": "ai_api_key", "keys_url": "console.anthropic.com"},
+    "google": {"name": "Google", "setting": "ai_google_key", "keys_url": "aistudio.google.com/apikey"},
+}
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}"
 DEFAULT_MODEL = "claude-opus-5-5"
 MAX_HISTORY = 40
 
@@ -31,10 +41,12 @@ Como responder:
 - Baseie-se nos dados do sistema que vêm a seguir (uma foto de agora). Não invente números: se algo não está nos \
 dados, diga que o sistema não tem essa informação.
 - Valores em reais (R$ 1.234,56), datas como 05/10.
-- Quando sugerir algo, diga onde fazer no sistema: abas Início, Pedidos, Agenda, Produtos, Estoque, Clientes e \
-Ajustes. Você não consegue alterar nada no sistema, só analisar e sugerir.
+- Quando sugerir algo, diga onde fazer no sistema: abas Início, Pedidos, Agenda, Produtos, Estoque, Clientes, \
+Ajustes e Ajuda (o manual). Você não consegue alterar nada no sistema, só analisar e sugerir.
 - Formatação: parágrafos curtos, listas simples com "- " e **negrito** para o mais importante. Sem tabelas e sem \
 títulos grandes.
+- Dúvida sobre como usar o sistema: responda pelo manual que vem a seguir (entre <manual> e </manual>), com o \
+passo a passo e o nome exato da aba e do botão. Se o manual não cobre o assunto, diga isso em vez de adivinhar.
 
 Como o sistema calcula:
 - Custo por unidade = insumos da receita + minutos de trabalho × valor da hora + minutos de máquina × valor da \
@@ -49,10 +61,16 @@ class AssistantError(Exception):
     """Erro já com mensagem amigável para mostrar na tela."""
 
 
+def provider_of(model: str) -> str:
+    return MODELS[model]["provider"]
+
+
 def get_config(conn: sqlite3.Connection) -> tuple[str, str]:
+    """(chave do fornecedor do modelo escolhido, modelo)."""
     s = pricing.get_settings(conn)
     model = s.get("ai_model") or DEFAULT_MODEL
-    return s.get("ai_api_key", ""), model if model in MODELS else DEFAULT_MODEL
+    model = model if model in MODELS else DEFAULT_MODEL
+    return s.get(PROVIDERS[provider_of(model)]["setting"], ""), model
 
 
 def key_hint(key: str) -> str | None:
@@ -175,6 +193,12 @@ def build_snapshot(conn: sqlite3.Connection) -> dict:
 
 # --- Conversa ------------------------------------------------------------------------
 
+def system_text() -> str:
+    """Instruções + manual: partes fixas, que ficam no cache da IA entre uma pergunta e outra."""
+    text = manual.manual_text()
+    return f"{SYSTEM_PROMPT}\n\n<manual>\n{text}\n</manual>" if text else SYSTEM_PROMPT
+
+
 def request_params(model: str, snapshot: dict, messages: list[dict]) -> dict:
     caps = MODELS[model]
     params: dict = {
@@ -182,7 +206,7 @@ def request_params(model: str, snapshot: dict, messages: list[dict]) -> dict:
         "max_tokens": 32000,
         "system": [
             # Instruções fixas primeiro (cacheáveis), dados do momento depois.
-            {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": system_text(), "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": "Dados do sistema agora (JSON):\n" + json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
              "cache_control": {"type": "ephemeral"}},
         ],
@@ -213,3 +237,128 @@ def clean_history(messages: list[dict]) -> list[dict]:
     if not out or out[-1]["role"] != "user":
         raise AssistantError("Escreva uma pergunta.")
     return out
+
+
+# --- Abrir a conversa (Anthropic ou Google) --------------------------------------------
+
+def open_chat(key: str, model: str, snapshot: dict, messages: list[dict]) -> Iterator[str]:
+    """Conecta e devolve os pedaços da resposta conforme chegam.
+    Erro de chave, internet ou cota vira AssistantError antes do primeiro pedaço."""
+    if provider_of(model) == "google":
+        return _google_chat(key, model, snapshot, messages)
+    return _anthropic_chat(key, model, snapshot, messages)
+
+
+def _anthropic_chat(key: str, model: str, snapshot: dict, messages: list[dict]) -> Iterator[str]:
+    manager = make_client(key).beta.messages.stream(**request_params(model, snapshot, messages))
+    try:
+        stream = manager.__enter__()  # abre a conexão aqui, para o erro virar resposta de erro
+    except anthropic.APIError as exc:
+        raise AssistantError(friendly_error(exc)) from exc
+
+    def generate():
+        try:
+            for text in stream.text_stream:
+                yield text
+            final = stream.get_final_message()
+            if final.stop_reason == "refusal":
+                yield "\n\nNão consigo ajudar com esse pedido. Tente perguntar de outro jeito."
+            elif final.stop_reason == "max_tokens":
+                yield "\n\n(A resposta ficou longa demais e foi cortada.)"
+        except anthropic.APIError as exc:
+            yield f"\n\n⚠️ {friendly_error(exc)}"
+        finally:
+            manager.__exit__(None, None, None)
+
+    return generate()
+
+
+def _google_request(key: str, url: str, body: dict | None = None):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        method="POST" if body is not None else "GET",
+    )
+    try:
+        return urllib.request.urlopen(req, timeout=120)  # noqa: S310 — URL fixa do Google
+    except urllib.error.HTTPError as exc:
+        raise AssistantError(google_error(exc.code, exc.read())) from exc
+    except OSError as exc:
+        raise AssistantError("Sem conexão com a internet. O assistente precisa de internet para funcionar.") from exc
+
+
+def google_error(status: int, raw: bytes) -> str:
+    try:
+        err = json.loads(raw).get("error", {})
+    except ValueError:
+        err = {}
+    text = f"{err.get('message', '')} {err.get('status', '')} {json.dumps(err.get('details', ''))}".lower()
+    if "api key not valid" in text or "api_key_invalid" in text or status == 401:
+        return "A chave do Google não foi aceita. Confira em Ajustes → Assistente."
+    if status == 403:
+        return "Essa chave do Google não tem permissão para usar o Gemini."
+    if status == 404:
+        return "Modelo não encontrado para essa chave. Escolha outro em Ajustes → Assistente."
+    if status == 429:
+        return "Limite de uso da chave do Google atingido. Espere um pouco e tente de novo."
+    if status >= 500:
+        return "O serviço da IA está instável agora. Tente de novo daqui a pouco."
+    return f"O Google recusou o pedido ({status})."
+
+
+def google_body(snapshot: dict, messages: list[dict]) -> dict:
+    data = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+    return {
+        # Instruções e manual primeiro (iguais em toda pergunta), dados do momento no fim.
+        "systemInstruction": {"parts": [{"text": f"{system_text()}\n\nDados do sistema agora (JSON):\n{data}"}]},
+        "contents": [
+            {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
+            for m in messages[-MAX_HISTORY:]
+        ],
+        # O Gemini 2.5 "pensa" antes de responder e isso conta neste limite: precisa ser folgado.
+        "generationConfig": {"maxOutputTokens": 32768},
+    }
+
+
+def _google_chat(key: str, model: str, snapshot: dict, messages: list[dict]) -> Iterator[str]:
+    url = GEMINI_URL.format(model=model) + ":streamGenerateContent?alt=sse"
+    res = _google_request(key, url, google_body(snapshot, messages))
+
+    def generate():
+        finish = None
+        blocked = False
+        try:
+            for raw in res:  # cada evento chega como uma linha "data: {...}"
+                line = raw.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                event = json.loads(line[5:])
+                if event.get("promptFeedback", {}).get("blockReason"):
+                    blocked = True
+                candidate = (event.get("candidates") or [{}])[0]
+                for part in candidate.get("content", {}).get("parts", []):
+                    if part.get("text") and not part.get("thought"):
+                        yield part["text"]
+                finish = candidate.get("finishReason") or finish
+            if blocked or finish in ("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"):
+                yield "\n\nNão consigo ajudar com esse pedido. Tente perguntar de outro jeito."
+            elif finish == "MAX_TOKENS":
+                yield "\n\n(A resposta ficou longa demais e foi cortada.)"
+        except (OSError, ValueError):
+            yield "\n\n⚠️ A conexão com a IA caiu no meio da resposta. Tente de novo."
+        finally:
+            res.close()
+
+    return generate()
+
+
+def test_connection(key: str, model: str) -> str:
+    """Confere a chave sem gastar (só consulta o modelo). Devolve o nome do modelo."""
+    if provider_of(model) == "google":
+        with _google_request(key, GEMINI_URL.format(model=model)) as res:
+            return json.load(res).get("displayName", model)
+    try:
+        return make_client(key).models.retrieve(model).display_name
+    except anthropic.APIError as exc:
+        raise AssistantError(friendly_error(exc)) from exc

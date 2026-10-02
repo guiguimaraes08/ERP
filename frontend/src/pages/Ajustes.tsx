@@ -1,6 +1,6 @@
-import { FolderOpen, History, KeyRound, Monitor, Moon, RefreshCw, Save, Smartphone, Sparkles, Sun } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, type AppInfo, type AssistantConfig, type Settings } from '../api';
+import { BookOpen, FolderOpen, History, KeyRound, Monitor, Moon, RefreshCw, Save, Smartphone, Sparkles, Sun } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { api, type AiProvider, type AppInfo, type AssistantConfig, type Settings } from '../api';
 import { Button, Card, ErrorBox, Field, inputCls, Loading, PageHeader, toNum, useFeedback, useLoad } from '../ui';
 
 type Theme = 'auto' | 'light' | 'dark';
@@ -142,7 +142,14 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <PageHeader title="Ajustes" />
+      <PageHeader
+        title="Ajustes"
+        action={
+          <a href="#/ajuda" className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-line bg-surface hover:bg-surface-2 font-medium">
+            <BookOpen className="w-4 h-4" /> Manual de uso
+          </a>
+        }
+      />
 
       <Card className="p-5">
         <form onSubmit={save} className="space-y-4">
@@ -299,6 +306,29 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+const PROVIDER_STEPS: Record<AiProvider, { name: string; url: string; steps: ReactNode[]; placeholder: string }> = {
+  anthropic: {
+    name: 'Anthropic (Claude)',
+    url: 'https://console.anthropic.com/settings/keys',
+    placeholder: 'sk-ant-...',
+    steps: [
+      <>Entre em <b>console.anthropic.com</b> e crie uma conta.</>,
+      'Adicione créditos (paga pelo uso: cada pergunta custa centavos).',
+      <>Em <b>API Keys</b>, crie uma chave e cole aqui.</>,
+    ],
+  },
+  google: {
+    name: 'Google (Gemini)',
+    url: 'https://aistudio.google.com/apikey',
+    placeholder: 'Cole a chave do Google aqui',
+    steps: [
+      <>Entre em <b>aistudio.google.com/apikey</b> com uma conta Google.</>,
+      <>Clique em <b>Criar chave de API</b> e copie.</>,
+      'Cole aqui. O Google cobra pelo uso e costuma ter uma faixa gratuita: confira em ai.google.dev/pricing.',
+    ],
+  },
+};
+
 function AiSettings() {
   const { data } = useLoad<AssistantConfig>('/assistant/config');
   const { toast, fail } = useFeedback();
@@ -312,13 +342,19 @@ function AiSettings() {
 
   if (!data) return null;
 
+  // O fornecedor segue o modelo escolhido na lista (mesmo antes de salvar).
+  const chosen = data.models.find((m) => m.id === (model || data.model)) ?? data.models[0];
+  const provider = PROVIDER_STEPS[chosen.provider];
+  const hasKey = chosen.has_key;
+  const sameProvider = chosen.provider === data.provider;
+
   const save = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await api.put('/assistant/config', { model, ...(key.trim() ? { api_key: key.trim() } : {}) });
+      const r = await api.put<AssistantConfig>('/assistant/config', { model, ...(key.trim() ? { api_key: key.trim() } : {}) });
       setKey('');
-      toast('Assistente configurado');
-      if (key.trim()) test();
+      toast(r.configured ? 'Assistente configurado' : `Falta a chave do ${r.provider_name}`, r.configured ? 'success' : 'danger');
+      if (r.configured) test();
     } catch (err) {
       fail(err);
     }
@@ -351,19 +387,38 @@ function AiSettings() {
         <Sparkles className="w-4 h-4 text-primary" /> Assistente com IA
       </h2>
       <p className="text-sm text-muted mt-1">
-        Um chat que analisa seus pedidos, estoque, preços e agenda (botão <b className="text-ink">Assistente</b> no canto da tela).
-        Usa a IA Claude, da Anthropic: precisa de internet e de uma chave da API.
+        Um chat que analisa seus pedidos, estoque, preços e agenda, e tira dúvidas pelo manual (botão{' '}
+        <b className="text-ink">Assistente</b> no canto da tela). Precisa de internet e de uma chave de API de uma destas
+        empresas: Anthropic (Claude) ou Google (Gemini).
       </p>
-      <ol className="text-sm text-muted mt-3 space-y-1 list-decimal pl-5">
-        <li>Entre em <a className="text-primary underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a> e crie uma conta.</li>
-        <li>Adicione créditos (paga pelo uso: cada pergunta custa centavos).</li>
-        <li>Em <b>API Keys</b>, crie uma chave e cole aqui.</li>
-      </ol>
 
       <form onSubmit={save} className="mt-4 space-y-3">
+        <Field label="Modelo" hint="Cada empresa tem a sua chave. Trocar de modelo não apaga a chave da outra.">
+          <select className={inputCls} value={model} onChange={(e) => setModel(e.target.value)}>
+            {data.models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+                {m.has_key ? '' : ' (sem chave)'}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <div className="rounded-lg bg-surface-2 p-3 text-sm">
+          <div className="font-medium mb-1">Como conseguir a chave do {provider.name}</div>
+          <ol className="text-muted space-y-1 list-decimal pl-5">
+            {provider.steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+          <a className="text-primary underline text-sm inline-block mt-2" href={provider.url} target="_blank" rel="noreferrer">
+            Abrir a página das chaves
+          </a>
+        </div>
+
         <Field
-          label="Chave da API"
-          hint={data.configured ? <>Chave salva: <code>{data.key_hint}</code>. Para trocar, cole uma nova.</> : 'Começa com sk-ant-'}
+          label={`Chave da API (${provider.name})`}
+          hint={hasKey ? (sameProvider && data.key_hint ? <>Chave salva: <code>{data.key_hint}</code>. Para trocar, cole uma nova.</> : 'Chave salva. Para trocar, cole uma nova.') : undefined}
         >
           <div className="relative">
             <KeyRound className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
@@ -371,22 +426,15 @@ function AiSettings() {
               type="password"
               autoComplete="off"
               className={`${inputCls} pl-9`}
-              placeholder={data.configured ? '•••••••• (salva)' : 'sk-ant-...'}
+              placeholder={hasKey ? '•••••••• (salva)' : provider.placeholder}
               value={key}
               onChange={(e) => setKey(e.target.value)}
             />
           </div>
         </Field>
-        <Field label="Modelo" hint="O padrão é o mais inteligente. Os outros custam menos por pergunta.">
-          <select className={inputCls} value={model} onChange={(e) => setModel(e.target.value)}>
-            {data.models.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
-        </Field>
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant="primary" disabled={!key.trim() && model === data.model}>Salvar</Button>
-          {data.configured && (
+          {data.configured && sameProvider && (
             <>
               <Button onClick={test} disabled={testing}>{testing ? 'Testando…' : 'Testar conexão'}</Button>
               <Button variant="ghost" onClick={removeKey}>Remover chave</Button>
@@ -395,8 +443,9 @@ function AiSettings() {
         </div>
       </form>
       <p className="text-xs text-muted mt-3">
-        Privacidade: ao perguntar, sua pergunta e um resumo dos dados do sistema (pedidos, clientes, estoque, preços) são enviados
-        à Anthropic para gerar a resposta. A chave fica guardada só neste computador, também dentro das cópias de segurança.
+        Privacidade: ao perguntar, sua pergunta, o manual e um resumo dos dados do sistema (pedidos, clientes, estoque, preços)
+        são enviados à empresa da IA escolhida para gerar a resposta. As chaves ficam guardadas só neste computador, também
+        dentro das cópias de segurança.
       </p>
     </Card>
   );

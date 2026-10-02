@@ -1,7 +1,8 @@
-import { Boxes, CalendarDays, ClipboardList, Home, Package, Settings as SettingsIcon, Users } from 'lucide-react';
+import { BookOpen, Boxes, CalendarDays, ClipboardList, Home, Package, Settings as SettingsIcon, Users } from 'lucide-react';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import type { Settings } from './api';
 import Agenda from './pages/Agenda';
+import Ajuda from './pages/Ajuda';
 import Ajustes from './pages/Ajustes';
 import Clientes from './pages/Clientes';
 import Estoque from './pages/Estoque';
@@ -12,7 +13,7 @@ import { FeedbackProvider, prefetch, slide, useLoad, type SlideDirection } from 
 import UpdateBanner from './UpdateBanner';
 import Assistant from './Assistant';
 
-export type Route = 'inicio' | 'pedidos' | 'agenda' | 'produtos' | 'estoque' | 'clientes' | 'ajustes';
+export type Route = 'inicio' | 'pedidos' | 'agenda' | 'produtos' | 'estoque' | 'clientes' | 'ajustes' | 'ajuda';
 
 const NAV: { route: Route; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { route: 'inicio', label: 'Início', icon: Home },
@@ -24,10 +25,13 @@ const NAV: { route: Route; label: string; icon: ComponentType<{ className?: stri
   { route: 'ajustes', label: 'Ajustes', icon: SettingsIcon },
 ];
 
+// Ajuda fica fora da barra do celular (já tem 7 itens); no computador, no pé do menu lateral.
+const ALL_ROUTES: Route[] = [...NAV.map((n) => n.route), 'ajuda'];
+
 /** Rota no hash (#/pedidos?status=a_fazer): o botão voltar do navegador funciona. */
 function readHash(): { route: Route; params: URLSearchParams } {
   const [path, query] = window.location.hash.replace(/^#\/?/, '').split('?');
-  const route = NAV.some((n) => n.route === path) ? (path as Route) : 'inicio';
+  const route = ALL_ROUTES.includes(path as Route) ? (path as Route) : 'inicio';
   return { route, params: new URLSearchParams(query) };
 }
 
@@ -43,7 +47,7 @@ export default function App() {
 
   useEffect(() => {
     // Trocar de tela desliza: para a direita quem fica depois no menu, para a esquerda quem fica antes.
-    const order = (r: Route) => NAV.findIndex((n) => n.route === r);
+    const order = (r: Route) => ALL_ROUTES.indexOf(r);
     const onChange = () => {
       const next = readHash();
       const from = order(current.current.route);
@@ -99,7 +103,18 @@ export default function App() {
               </a>
             ))}
           </nav>
-          <p className="mt-auto px-3 text-xs text-muted">Seus dados ficam só neste computador.</p>
+          <div className="mt-auto">
+            <a
+              href="#/ajuda"
+              className={`flex items-center gap-3 px-3 h-10 rounded-lg text-[15px] font-medium transition-colors ${
+                route === 'ajuda' ? 'bg-primary-soft text-primary' : 'text-muted hover:text-ink hover:bg-surface-2'
+              }`}
+            >
+              <BookOpen className="w-5 h-5" />
+              Ajuda
+            </a>
+            <p className="px-3 mt-3 text-xs text-muted">Seus dados ficam só neste computador.</p>
+          </div>
         </aside>
 
         <main className="page-area flex-1 min-w-0 px-4 sm:px-8 pt-5 sm:pt-8 pb-28 sm:pb-12 max-w-5xl">
@@ -111,6 +126,7 @@ export default function App() {
           {route === 'estoque' && <Estoque initialFilter={params.get('filtro')} />}
           {route === 'clientes' && <Clientes />}
           {route === 'ajustes' && <Ajustes onSaved={settings.reload} />}
+          {route === 'ajuda' && <Ajuda />}
         </main>
 
         <Assistant />

@@ -10,15 +10,16 @@ Controle de produção para quem fabrica em casa: impressão 3D, cordões, chave
   fila pelos prazos e mostra quando cada pedido fica pronto, o que vai atrasar e quanto do dia está livre. Ao anotar um
   pedido ele já diz "fica pronto por volta de qua 08/10" e sugere um prazo seguro para combinar com o cliente.
 - **Assistente com IA**: botão no canto da tela abre um chat que analisa os pedidos, estoque, preços e agenda
-  ("como foi meu mês?", "o que preciso comprar?", "estou cobrando barato?"). Usa o Claude, da Anthropic: precisa de
-  internet e de uma chave da API (Ajustes → Assistente com IA). A pergunta e um resumo dos dados vão para a Anthropic.
+  ("como foi meu mês?", "o que preciso comprar?", "estou cobrando barato?"). Também tira dúvidas de uso, porque lê o manual. Usa o Gemini (Google) ou o Claude (Anthropic): precisa de
+  internet e de uma chave da API (Ajustes → Assistente com IA). A pergunta, o manual e um resumo dos dados vão para a
+  empresa da IA escolhida.
 - **Início**: o que está atrasado, o que vence em 3 dias, quanto tem a receber, quanto entrou no mês e o que vai faltar de material.
 
 ---
 
 ## Para quem vai usar
 
-O passo a passo completo, com exemplos e as vantagens conferidas, está em **docs/Manual do Nexos ERP.pdf**.
+O passo a passo completo, com exemplos e as vantagens conferidas, está na aba **Ajuda** do programa e em **docs/Manual do Nexos ERP.pdf**.
 
 1. Baixe o instalador: **https://github.com/guiguimaraes08/ERP/releases/latest/download/Instalar-Nexos-ERP.exe**
 2. Dê dois cliques e vá em **Avançar** até o fim. Ele baixa a versão mais nova e cria o ícone na Área de Trabalho.
@@ -74,6 +75,11 @@ Sai tudo em `dist/` (os instaladores só se o [Inno Setup 6](https://jrsoftware.
 | `Nexos-ERP.exe` | o mesmo, com o nome que a atualização automática e o instalador procuram na Release |
 | `Instalar-Nexos-ERP.exe` | instalador pequeno que baixa a última versão do GitHub |
 | `Instalar-Nexos-ERP-offline.exe` | instalador com o programa dentro |
+
+### Manual
+
+A fonte é `docs/manual.md`. Dela saem a aba Ajuda, o que o Assistente lê e o PDF. Depois de editar, gere o PDF de novo
+(gerador de documentos da Nexos) e rode o `build.py`, que coloca os dois dentro do .exe.
 
 ### Publicar uma versão nova
 

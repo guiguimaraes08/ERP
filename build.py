@@ -63,6 +63,9 @@ def main() -> None:
         "--icon", str(ROOT / "assets" / "icone.ico"),
         "--paths", str(ROOT / "backend"),
         "--add-data", f"{FRONTEND / 'dist'}{sep}frontend_dist",
+        # Manual: a aba Ajuda e o Assistente leem o .md; o botão PDF entrega o .pdf.
+        "--add-data", f"{ROOT / 'docs' / 'manual.md'}{sep}docs",
+        "--add-data", f"{ROOT / 'docs' / 'Manual do Nexos ERP.pdf'}{sep}docs",
         "--collect-submodules", "uvicorn",  # o uvicorn carrega partes por nome
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),

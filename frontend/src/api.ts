@@ -337,9 +337,14 @@ export const api = {
 
 /* ---------- Assistente com IA ---------- */
 
+export type AiProvider = 'anthropic' | 'google';
+
 export interface AssistantConfig {
   configured: boolean;
   key_hint: string | null;
   model: string;
-  models: { id: string; label: string }[];
+  provider: AiProvider;
+  provider_name: string;
+  keys_url: string;
+  models: { id: string; label: string; provider: AiProvider; has_key: boolean }[];
 }

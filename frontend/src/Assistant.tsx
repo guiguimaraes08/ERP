@@ -1,7 +1,8 @@
-import { MessageSquarePlus, Send, Sparkles, Square, X } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { BookOpen, MessageSquarePlus, Send, Sparkles, Square, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { go } from './App';
 import type { AssistantConfig } from './api';
+import Markdown from './Markdown';
 import { Button, useLoad } from './ui';
 
 interface Msg {
@@ -16,6 +17,7 @@ const SUGGESTIONS = [
   'Quais produtos dão mais lucro por hora de trabalho?',
   'Algum pedido vai atrasar? O que eu faço?',
   'Estou cobrando barato em algum produto?',
+  'Como eu registro uma compra de material?',
 ];
 
 /** Balão de conversa com a IA, disponível em todas as telas. */
@@ -32,6 +34,17 @@ export default function Assistant() {
   useEffect(() => {
     listEnd.current?.scrollIntoView({ block: 'end' });
   }, [messages, open]);
+
+  // Outras telas (ex.: Ajuda) abrem o assistente, às vezes já com uma pergunta escrita.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      setOpen(true);
+      const question = (e as CustomEvent<string>).detail;
+      if (question) setInput(question);
+    };
+    window.addEventListener('nexos:ask', onAsk);
+    return () => window.removeEventListener('nexos:ask', onAsk);
+  }, []);
 
   const close = () => {
     setClosing(true);
@@ -116,6 +129,9 @@ export default function Assistant() {
               <div className="font-semibold leading-tight">Assistente</div>
               <div className="text-xs text-muted truncate">Analisa os dados do seu negócio</div>
             </div>
+            <button onClick={() => (close(), go('ajuda'))} className="p-2 rounded-lg text-muted hover:text-ink hover:bg-surface-2 cursor-pointer" title="Abrir o manual" aria-label="Abrir o manual">
+              <BookOpen className="w-5 h-5" />
+            </button>
             {messages.length > 0 && (
               <button onClick={reset} className="p-2 rounded-lg text-muted hover:text-ink hover:bg-surface-2 cursor-pointer" title="Nova conversa" aria-label="Nova conversa">
                 <MessageSquarePlus className="w-5 h-5" />
@@ -131,7 +147,7 @@ export default function Assistant() {
               <div className="text-center py-8 px-2">
                 <p className="font-semibold">Falta configurar a IA</p>
                 <p className="text-sm text-muted mt-1">
-                  Para conversar, cole uma chave da API da Anthropic em Ajustes. Leva 2 minutos.
+                  Para conversar, cole uma chave de API do Google (Gemini) ou da Anthropic (Claude) em Ajustes. Leva 2 minutos.
                 </p>
                 <Button variant="primary" className="mt-4" onClick={() => (close(), go('ajustes'))}>
                   Configurar agora
@@ -171,7 +187,7 @@ export default function Assistant() {
                         <i /><i /><i />
                       </span>
                     ) : m.role === 'assistant' ? (
-                      <RichText text={m.content} />
+                      <Markdown text={m.content} compact />
                     ) : (
                       <span className="whitespace-pre-wrap">{m.content}</span>
                     )}
@@ -217,43 +233,5 @@ export default function Assistant() {
         </section>
       )}
     </>
-  );
-}
-
-/** Markdown bem simples: parágrafos, listas com "-" ou "1." e **negrito**. */
-function RichText({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-  const flush = () => {
-    if (!list) return;
-    const Tag = list.ordered ? 'ol' : 'ul';
-    blocks.push(
-      <Tag key={blocks.length} className={`${list.ordered ? 'list-decimal' : 'list-disc'} pl-5 space-y-1`}>
-        {list.items.map((it, i) => <li key={i}>{inline(it)}</li>)}
-      </Tag>,
-    );
-    list = null;
-  };
-  for (const raw of text.split('\n')) {
-    const line = raw.trimEnd();
-    const bullet = line.match(/^\s*[-•*]\s+(.*)$/);
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    if (bullet || numbered) {
-      const ordered = !!numbered;
-      if (list && list.ordered !== ordered) flush();
-      list = list ?? { ordered, items: [] };
-      list.items.push((bullet ?? numbered)![1]);
-      continue;
-    }
-    flush();
-    if (line.trim()) blocks.push(<p key={blocks.length}>{inline(line.replace(/^#+\s*/, ''))}</p>);
-  }
-  flush();
-  return <div className="space-y-2">{blocks}</div>;
-}
-
-function inline(text: string): ReactNode {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-    part.startsWith('**') && part.endsWith('**') ? <b key={i}>{part.slice(2, -2)}</b> : <Fragment key={i}>{part}</Fragment>,
   );
 }
