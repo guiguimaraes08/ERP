@@ -1,6 +1,6 @@
-import { FolderOpen, History, Monitor, Moon, Save, Smartphone, Sun } from 'lucide-react';
+import { FolderOpen, History, KeyRound, Monitor, Moon, Save, Smartphone, Sparkles, Sun } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, type AppInfo, type Settings } from '../api';
+import { api, type AppInfo, type AssistantConfig, type Settings } from '../api';
 import { Button, Card, ErrorBox, Field, inputCls, Loading, PageHeader, toNum, useFeedback, useLoad } from '../ui';
 
 type Theme = 'auto' | 'light' | 'dark';
@@ -194,6 +194,8 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
         </div>
       </Card>
 
+      <AiSettings />
+
       <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -261,5 +263,108 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
 
       {info.data && <p className="text-xs text-muted text-center">Nexos ERP · versão {info.data.version}</p>}
     </div>
+  );
+}
+
+function AiSettings() {
+  const { data } = useLoad<AssistantConfig>('/assistant/config');
+  const { toast, fail } = useFeedback();
+  const [key, setKey] = useState('');
+  const [model, setModel] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (data) setModel(data.model);
+  }, [data]);
+
+  if (!data) return null;
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.put('/assistant/config', { model, ...(key.trim() ? { api_key: key.trim() } : {}) });
+      setKey('');
+      toast('Assistente configurado');
+      if (key.trim()) test();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const r = await api.post<{ model: string }>('/assistant/test');
+      toast(`Funcionando! Conectado ao ${r.model}`);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const removeKey = async () => {
+    try {
+      await api.put('/assistant/config', { model, api_key: '' });
+      toast('Chave removida');
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-semibold flex items-center gap-2">
+        <Sparkles className="w-4 h-4 text-primary" /> Assistente com IA
+      </h2>
+      <p className="text-sm text-muted mt-1">
+        Um chat que analisa seus pedidos, estoque, preços e agenda (botão <b className="text-ink">Assistente</b> no canto da tela).
+        Usa a IA Claude, da Anthropic: precisa de internet e de uma chave da API.
+      </p>
+      <ol className="text-sm text-muted mt-3 space-y-1 list-decimal pl-5">
+        <li>Entre em <a className="text-primary underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a> e crie uma conta.</li>
+        <li>Adicione créditos (paga pelo uso: cada pergunta custa centavos).</li>
+        <li>Em <b>API Keys</b>, crie uma chave e cole aqui.</li>
+      </ol>
+
+      <form onSubmit={save} className="mt-4 space-y-3">
+        <Field
+          label="Chave da API"
+          hint={data.configured ? <>Chave salva: <code>{data.key_hint}</code>. Para trocar, cole uma nova.</> : 'Começa com sk-ant-'}
+        >
+          <div className="relative">
+            <KeyRound className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="password"
+              autoComplete="off"
+              className={`${inputCls} pl-9`}
+              placeholder={data.configured ? '•••••••• (salva)' : 'sk-ant-...'}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+            />
+          </div>
+        </Field>
+        <Field label="Modelo" hint="O padrão é o mais inteligente. Os outros custam menos por pergunta.">
+          <select className={inputCls} value={model} onChange={(e) => setModel(e.target.value)}>
+            {data.models.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={!key.trim() && model === data.model}>Salvar</Button>
+          {data.configured && (
+            <>
+              <Button onClick={test} disabled={testing}>{testing ? 'Testando…' : 'Testar conexão'}</Button>
+              <Button variant="ghost" onClick={removeKey}>Remover chave</Button>
+            </>
+          )}
+        </div>
+      </form>
+      <p className="text-xs text-muted mt-3">
+        Privacidade: ao perguntar, sua pergunta e um resumo dos dados do sistema (pedidos, clientes, estoque, preços) são enviados
+        à Anthropic para gerar a resposta. A chave fica guardada só neste computador, também dentro das cópias de segurança.
+      </p>
+    </Card>
   );
 }

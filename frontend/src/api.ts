@@ -327,3 +327,12 @@ export const api = {
   del: <T = void>(path: string) => request<T>('DELETE', path),
   upload: <T>(path: string, file: Blob) => request<T>('POST', path, file),
 };
+
+/* ---------- Assistente com IA ---------- */
+
+export interface AssistantConfig {
+  configured: boolean;
+  key_hint: string | null;
+  model: string;
+  models: { id: string; label: string }[];
+}

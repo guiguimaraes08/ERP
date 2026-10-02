@@ -263,3 +263,59 @@ html[data-slide$='-back'] ::view-transition-old(tab-panel) {
     animation: none !important;
   }
 }
+
+/* ---- Assistente: painel desliza da direita (computador) ou de baixo (celular) ---- */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-panel {
+    animation: sheet-up 340ms var(--ease-out) both;
+  }
+  .chat-panel-out {
+    animation: sheet-down 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  @media (min-width: 640px) {
+    .chat-panel {
+      animation-name: panel-in-right;
+    }
+    .chat-panel-out {
+      animation-name: panel-out-right;
+    }
+  }
+  .msg-in {
+    animation: msg-up 300ms var(--ease-out) both;
+  }
+  .fab-in {
+    animation: fab-up 360ms var(--ease-out) both;
+  }
+}
+@keyframes panel-in-right {
+  from { transform: translateX(calc(100% + 24px)); }
+}
+@keyframes panel-out-right {
+  to { transform: translateX(calc(100% + 24px)); }
+}
+@keyframes msg-up {
+  from { transform: translateY(14px); }
+}
+@keyframes fab-up {
+  from { transform: translateY(120px); }
+}
+
+/* Três pontinhos "escrevendo…" */
+.typing {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+.typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: typing 1s ease-in-out infinite;
+}
+.typing i:nth-child(2) { animation-delay: 0.15s; }
+.typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-5px); }
+}

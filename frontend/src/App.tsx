@@ -10,6 +10,7 @@ import Pedidos from './pages/Pedidos';
 import Produtos from './pages/Produtos';
 import { FeedbackProvider, prefetch, slide, useLoad, type SlideDirection } from './ui';
 import UpdateBanner from './UpdateBanner';
+import Assistant from './Assistant';
 
 export type Route = 'inicio' | 'pedidos' | 'agenda' | 'produtos' | 'estoque' | 'clientes' | 'ajustes';
 
@@ -111,6 +112,8 @@ export default function App() {
           {route === 'clientes' && <Clientes />}
           {route === 'ajustes' && <Ajustes onSaved={settings.reload} />}
         </main>
+
+        <Assistant />
 
         {/* Barra inferior (celular) */}
         <nav className="tab-bar sm:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line grid grid-cols-7 pb-[env(safe-area-inset-bottom)]">
