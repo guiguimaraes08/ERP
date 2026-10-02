@@ -2,3 +2,4 @@ fastapi>=0.115
 uvicorn>=0.30
 pywebview>=6
 segno>=1.6
+anthropic>=1.11
