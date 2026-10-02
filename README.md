@@ -27,8 +27,9 @@ Aparece porque o programa não tem assinatura digital paga.
 
 **Sem internet?** Use o instalador *offline* (pendrive). Ou copie só o `Nexos ERP.exe` e abra direto: ele funciona sem instalar.
 
-**Atualizações:** quando sair uma versão nova, aparece um aviso no topo do programa. É clicar em **Atualizar agora** e ele
-baixa e abre de novo sozinho.
+**Atualizações:** toda vez que o programa abre, a tela de abertura procura uma versão nova no GitHub; se tiver, ela
+baixa (com barra de progresso) e o programa reabre já atualizado. Sem internet, abre normalmente. Dá para desligar em
+**Ajustes → Atualizar sozinho ao abrir**; nesse caso aparece um aviso no topo com o botão **Atualizar agora**.
 
 **Seus dados** ficam em `Documentos\Nexos ERP`. Atualizar, reinstalar ou desinstalar não apaga nada.
 - Todo dia o programa guarda sozinho uma cópia na pasta `backups` (as dos últimos 30 dias).
@@ -101,7 +102,7 @@ cd backend && ../.venv/Scripts/python -m pytest
 ### Estrutura
 
 ```
-run.py                 abre o programa: sobe o servidor e a janela (pywebview)
+run.py                 abre o programa: tela de abertura, atualização, servidor e janela (pywebview)
 build.py               gera o .exe (PyInstaller) e os instaladores (Inno Setup)
 installer/NexosERP.iss script do instalador
 assets/icone.ico       ícone do programa
@@ -116,6 +117,7 @@ backend/app/
   services/assistant.py assistente com IA: resumo dos dados + conversa com o Claude (SDK anthropic)
   routers/             materials, products, orders, customers, system
   seed.py              dados de exemplo
+  splash.py            tela de abertura (NEXOS / Enterprise Resource Planning)
 backend/tests/         regras de negócio (estoque, preço, pagamento, backup)
 frontend/src/
   api.ts  format.ts  ui.tsx

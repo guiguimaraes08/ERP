@@ -105,6 +105,7 @@ class SettingsIn(BaseModel):
     machine_rate: float = Field(ge=0)
     default_margin: float = Field(ge=0, lt=95)
     allow_phone: bool = False
+    auto_update: bool = True
 
 
 class WorkerIn(BaseModel):

@@ -1,4 +1,4 @@
-import { FolderOpen, History, KeyRound, Monitor, Moon, Save, Smartphone, Sparkles, Sun } from 'lucide-react';
+import { FolderOpen, History, KeyRound, Monitor, Moon, RefreshCw, Save, Smartphone, Sparkles, Sun } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type AppInfo, type AssistantConfig, type Settings } from '../api';
 import { Button, Card, ErrorBox, Field, inputCls, Loading, PageHeader, toNum, useFeedback, useLoad } from '../ui';
@@ -53,6 +53,7 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
     machine_rate: toNum(form.machine_rate),
     default_margin: toNum(form.default_margin),
     allow_phone: data.allow_phone,
+    auto_update: data.auto_update,
     ...patch,
   });
 
@@ -72,6 +73,16 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
       await api.put('/settings', payload({ allow_phone: !data.allow_phone }));
       reload();
       toast(data.allow_phone ? 'Acesso pelo celular desligado' : 'Ligado! Feche e abra o programa de novo para valer');
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const toggleAutoUpdate = async () => {
+    try {
+      await api.put('/settings', payload({ auto_update: !data.auto_update }));
+      reload();
+      toast(data.auto_update ? 'Atualização automática desligada' : 'Atualização automática ligada');
     } catch (err) {
       fail(err);
     }
@@ -261,7 +272,29 @@ export default function Ajustes({ onSaved }: { onSaved: () => void }) {
         </div>
       </Card>
 
-      {info.data && <p className="text-xs text-muted text-center">Nexos ERP · versão {info.data.version}</p>}
+      <Card className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-semibold flex items-center gap-2">
+              <RefreshCw className="w-4 h-4" /> Atualizar sozinho ao abrir
+            </h2>
+            <p className="text-sm text-muted mt-1">
+              Toda vez que o programa abre, ele procura uma versão nova no GitHub e, se tiver, instala antes de começar.
+              Sem internet, abre normalmente.
+            </p>
+            {info.data && <p className="text-xs text-muted mt-2">Você está na versão {info.data.version}.</p>}
+          </div>
+          <button
+            role="switch"
+            aria-checked={data.auto_update}
+            aria-label="Atualizar sozinho ao abrir"
+            onClick={toggleAutoUpdate}
+            className={`shrink-0 w-12 h-7 rounded-full p-1 transition-colors cursor-pointer ${data.auto_update ? 'bg-primary' : 'bg-line'}`}
+          >
+            <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${data.auto_update ? 'translate-x-5' : ''}`} />
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }

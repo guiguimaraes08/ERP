@@ -204,6 +204,7 @@ DEFAULT_SETTINGS = {
     "machine_rate": "2",      # R$ por hora de máquina (energia + desgaste)
     "default_margin": "40",   # % de margem sobre o preço de venda
     "allow_phone": "0",       # 1 = aceita acesso pelo celular na rede de casa
+    "auto_update": "1",       # 1 = ao abrir, procura e instala versão nova do GitHub
     "machine_hours_per_day": "0",  # quantas horas as máquinas rodam por dia (0 = não considerar)
 }
 

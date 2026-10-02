@@ -10,7 +10,25 @@
     <meta name="apple-mobile-web-app-title" content="Nexos" />
     <title>Nexos ERP</title>
     <link rel="icon" type="image/png" href="/icon-192.png" />
+    <style>
+      /* O sistema surge em fade-in. No programa (?desktop=1) espera a tela de abertura sair. */
+      html.pre-reveal #root { opacity: 0; }
+      html.reveal #root { animation: app-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+      @keyframes app-in { from { opacity: 0; transform: translateY(12px) scale(0.99); } }
+      @media (prefers-reduced-motion: reduce) { html.reveal #root { animation: none; } }
+    </style>
     <script>
+      (function () {
+        var html = document.documentElement;
+        window.__nexosReveal = function () {
+          html.classList.remove('pre-reveal');
+          html.classList.add('reveal');
+        };
+        if (/[?&]desktop=1/.test(location.search)) {
+          html.classList.add('pre-reveal');
+          setTimeout(window.__nexosReveal, 8000); // segurança: nunca fica invisível
+        }
+      })();
       try {
         var t = localStorage.getItem('erp-theme');
         if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {

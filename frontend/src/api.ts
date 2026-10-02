@@ -152,6 +152,7 @@ export interface Settings {
   machine_rate: number;
   default_margin: number;
   allow_phone: boolean;
+  auto_update: boolean;
 }
 
 export interface AppInfo {

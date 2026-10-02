@@ -78,3 +78,42 @@ def test_qr_so_com_celular_ligado(client, monkeypatch):
     r = client.get("/api/phone-qr.svg")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("image/svg+xml")
+
+
+# --- Atualização ao abrir --------------------------------------------------------------
+
+def test_download_informa_progresso(monkeypatch, release, fake_exe):
+    serve(monkeypatch, NEW_EXE)
+    seen = []
+    updates.install("2.0.0", progress=lambda done, total: seen.append((done, total)))
+    assert seen[-1] == (len(NEW_EXE), len(NEW_EXE))
+    assert len(seen) > 1  # veio em pedaços
+
+
+def test_ao_abrir_so_atualiza_quando_tem_versao_nova(monkeypatch, tmp_path, release, fake_exe):
+    monkeypatch.setenv("ERP_DATA_DIR", str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    assert updates.startup_release("2.0.0")["version"] == "9.9.9"
+    assert updates.startup_release("9.9.9") is None
+
+
+def test_ao_abrir_nao_atualiza_rodando_do_codigo(release):
+    assert updates.startup_release("2.0.0") is None  # installed_exe() é None fora do .exe
+
+
+def test_release_com_arquivo_errado_nao_vira_loop(monkeypatch, tmp_path, release, fake_exe):
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    monkeypatch.setenv("ERP_DATA_DIR", str(dados))
+    # A Release dizia 9.9.9, mas o .exe baixado abriu dizendo 2.0.0: não baixa de novo.
+    updates.confirm_update("9.9.9", "2.0.0")
+    assert updates.startup_release("2.0.0") is None
+    # Quando a versão certa abre, a marca some.
+    updates.confirm_update("9.9.9", "9.9.9")
+    assert updates.startup_release("2.0.0")["version"] == "9.9.9"
+
+
+def test_opcao_atualizar_sozinho(client):
+    assert client.get("/api/settings").json()["auto_update"] is True
+    body = {"business_name": "X", "labor_rate": 1, "machine_rate": 1, "default_margin": 30, "auto_update": False}
+    assert client.put("/api/settings", json=body).json()["auto_update"] is False

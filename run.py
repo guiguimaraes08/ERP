@@ -1,7 +1,11 @@
 """Nexos ERP: abre o sistema numa janela própria.
 
-Dois cliques no "Nexos ERP.exe" (ou `python run.py`) e pronto: o servidor sobe
-por baixo e fecha junto com a janela.
+Dois cliques no "Nexos ERP.exe" (ou `python run.py`):
+  1. aparece a tela de abertura (NEXOS);
+  2. no .exe, procura versão nova no GitHub e, se houver, baixa e reabre já atualizado;
+  3. liga o servidor, carrega o sistema numa janela escondida e troca as janelas,
+     com o sistema surgindo em fade-in.
+O servidor fecha junto com a janela.
 
     python run.py --navegador   → abre no navegador em vez da janela (para desenvolver)
 """
@@ -26,9 +30,11 @@ if not FROZEN:
 from app import __version__  # noqa: E402
 from app.db import connect, copy_database, data_dir, init_db  # noqa: E402
 from app.services import updates  # noqa: E402
+from app.splash import splash_html  # noqa: E402
 
 APP_NAME = "Nexos ERP"
 PREFERRED_PORT = 8765
+SPLASH_MIN_SECONDS = 2.6  # tempo para a animação da abertura terminar
 
 
 def message(text: str, error: bool = False) -> None:
@@ -64,6 +70,33 @@ def bring_to_front() -> bool:
     return True
 
 
+_instance_lock = None
+
+
+def single_instance(wait: float) -> bool:
+    """Trava do Windows para não abrir duas cópias. `wait`: quanto esperar a anterior fechar."""
+    global _instance_lock
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    deadline = time.time() + wait
+    while True:
+        handle = kernel32.CreateMutexW(None, False, "Local\\NexosERP")
+        if kernel32.GetLastError() != 183:  # 183 = ERROR_ALREADY_EXISTS: outra cópia aberta
+            _instance_lock = handle  # fica aberto enquanto o programa roda
+            return True
+        kernel32.CloseHandle(handle)
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.3)
+
+
 def free_port(host: str) -> int:
     with socket.socket() as s:
         try:
@@ -74,21 +107,30 @@ def free_port(host: str) -> int:
             return s.getsockname()[1]
 
 
-def phone_allowed() -> bool:
+def setting(key: str, default: str) -> str:
     conn = connect()
     try:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'allow_phone'").fetchone()
-        return bool(row and row["value"] == "1")
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
     finally:
         conn.close()
 
 
-def start_server(host: str, port: int):
+def start_server():
+    """Liga o servidor. Devolve (server, thread, url)."""
     import uvicorn
 
     from app.main import app
 
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None, log_level="warning"))
+    host = "0.0.0.0" if setting("allow_phone", "0") == "1" else "127.0.0.1"
+    port = free_port(host)
+    os.environ["ERP_PORT"] = str(port)
+    os.environ["ERP_PHONE"] = "1" if host == "0.0.0.0" else "0"
+
+    server = uvicorn.Server(uvicorn.Config(
+        app, host=host, port=port, log_config=None, log_level="warning",
+        timeout_graceful_shutdown=1,  # fechar a janela encerra o programa rápido
+    ))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.time() + 20
@@ -96,7 +138,22 @@ def start_server(host: str, port: int):
         if not thread.is_alive() or time.time() > deadline:
             raise RuntimeError("O servidor não conseguiu iniciar")
         time.sleep(0.05)
-    return server, thread
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
+def launch_new_version(target: str = "") -> None:
+    """Abre o .exe (já trocado pela versão nova); este processo fecha em seguida."""
+    exe = updates.installed_exe()
+    if exe is None:
+        return
+    # Sem isso, o .exe novo tentaria reaproveitar a pasta temporária deste (PyInstaller).
+    env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+    subprocess.Popen(
+        [str(exe), "--depois-de-atualizar", target],
+        env=env,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+    )
 
 
 class DesktopApi:
@@ -120,37 +177,105 @@ class DesktopApi:
         return str(target)
 
     def restart(self) -> None:
-        """Depois de atualizar: abre o .exe novo e fecha este."""
-        exe = updates.installed_exe()
-        if exe is None:
-            return
-        # Sem isso, o .exe novo tentaria reaproveitar a pasta temporária deste (PyInstaller).
-        env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
-        subprocess.Popen(
-            [str(exe), "--depois-de-atualizar"],
-            env=env,
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
+        """Atualização pelo botão da faixa: abre o .exe novo e fecha este."""
+        launch_new_version()
         self._window.destroy()
 
 
-def open_window(url: str) -> None:
+def boot(splash, api: DesktopApi, args, state: dict) -> None:
+    """Roda por trás da tela de abertura: atualização, servidor e janela principal."""
+    import webview
+
+    started = time.time()
+
+    def status(text: str, pct: float | None = None) -> None:
+        try:
+            splash.evaluate_js(f"setStatus({json.dumps(text)}, {json.dumps(pct)})")
+        except Exception:  # noqa: BLE001 — a tela de abertura é só enfeite
+            pass
+
+    # 1. Versão nova no GitHub? (só no .exe; sem internet segue direto)
+    if FROZEN and not args.depois_de_atualizar and setting("auto_update", "1") == "1":
+        status("Procurando atualização…")
+        release = updates.startup_release(__version__)
+        if release:
+            label = f"Baixando a versão {release['version']}…"
+            last = [0.0]
+
+            def progress(done: int, total: int) -> None:
+                if time.time() - last[0] > 0.1:  # no máximo 10 atualizações da barra por segundo
+                    last[0] = time.time()
+                    status(label, done / total if total else None)
+
+            try:
+                status(label, 0)
+                updates.install(__version__, progress=progress, release=release)
+                status("Pronto! Abrindo a versão nova…", 1)
+                launch_new_version(release["version"])
+                time.sleep(0.8)
+                splash.destroy()
+                return
+            except (updates.UpdateError, OSError) as exc:
+                print(f"Atualização automática falhou: {exc}", file=sys.stderr)
+                status("Não deu para atualizar agora. Abrindo assim mesmo…")
+                time.sleep(1.2)
+
+    # 2. Servidor
+    status("Abrindo…")
+    try:
+        server, thread, url = start_server()
+    except Exception as exc:  # noqa: BLE001
+        state["error"] = exc
+        splash.destroy()
+        return
+    state["server"], state["thread"] = server, thread
+
+    # 3. Janela principal: carrega escondida, aparece pronta.
+    main = webview.create_window(
+        APP_NAME, f"{url}/?desktop=1", js_api=api, width=1200, height=820,
+        min_size=(380, 560), text_select=True, hidden=True,
+    )
+    api._window = main
+    main.events.loaded.wait(20)
+    wait = SPLASH_MIN_SECONDS - (time.time() - started)
+    if wait > 0:
+        time.sleep(wait)
+    status("Pronto")
+    try:
+        splash.evaluate_js("leave()")
+    except Exception:  # noqa: BLE001
+        pass
+    time.sleep(0.38)
+    main.show()
+    try:
+        main.evaluate_js("window.__nexosReveal && window.__nexosReveal()")
+    except Exception:  # noqa: BLE001
+        pass
+    splash.destroy()
+    # A versão anterior (.old) já terminou de fechar: agora dá para apagar.
+    cleanup = threading.Timer(15, updates.cleanup_previous)
+    cleanup.daemon = True  # não segura o programa aberto depois que a janela fecha
+    cleanup.start()
+
+
+def open_desktop(args) -> dict:
     import webview
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True  # WhatsApp abre no navegador
-    api = DesktopApi()
-    api._window = webview.create_window(
-        APP_NAME, url, js_api=api, width=1200, height=820, min_size=(380, 560), text_select=True,
+    splash = webview.create_window(
+        f"{APP_NAME} · abrindo", html=splash_html(__version__), width=720, height=420,
+        frameless=True, easy_drag=True, resizable=False, background_color="#0c0b0a",
     )
-    webview.start(gui="edgechromium", private_mode=False)
+    state: dict = {}
+    webview.start(boot, (splash, DesktopApi(), args, state), gui="edgechromium", private_mode=False)
+    return state
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--navegador", action="store_true", help="abrir no navegador em vez da janela")
-    parser.add_argument("--depois-de-atualizar", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--depois-de-atualizar", nargs="?", const="", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     # Sem terminal (.exe), o que seria impresso vai para um arquivo de log.
@@ -161,50 +286,48 @@ def main() -> None:
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
 
-    # Reaberto pela atualização: espera a versão anterior terminar de fechar.
+    # Uma cópia só. Já aberta: traz a janela para a frente. Sem janela, a anterior está
+    # fechando (ou reabrindo pela atualização): espera ela terminar e segue normalmente.
+    if not single_instance(wait=0):
+        if bring_to_front():
+            return
+        if not single_instance(wait=20):
+            if already_running(PREFERRED_PORT):
+                webbrowser.open(f"http://127.0.0.1:{PREFERRED_PORT}")
+            return
     if args.depois_de_atualizar:
-        deadline = time.time() + 20
-        while already_running(PREFERRED_PORT) and time.time() < deadline:
-            time.sleep(0.3)
+        updates.confirm_update(args.depois_de_atualizar, __version__)
     updates.cleanup_previous()
-
-    # Clicou de novo com o programa aberto: mostra a janela que já existe.
-    if already_running(PREFERRED_PORT):
-        if args.navegador or not bring_to_front():
-            webbrowser.open(f"http://127.0.0.1:{PREFERRED_PORT}")
-        return
-
     init_db()
-    host = "0.0.0.0" if phone_allowed() else "127.0.0.1"
-    port = free_port(host)
-    os.environ["ERP_PORT"] = str(port)
-    os.environ["ERP_PHONE"] = "1" if host == "0.0.0.0" else "0"
-    url = f"http://127.0.0.1:{port}"
 
-    try:
-        server, thread = start_server(host, port)
-    except Exception as exc:  # noqa: BLE001
-        message(f"Não consegui abrir o sistema.\n\n{exc}\n\nDetalhes em: {folder / 'erp.log'}", error=True)
-        raise
-
-    try:
-        if args.navegador:
-            print(f"{APP_NAME} {__version__} em {url}  (Ctrl+C para fechar)")
-            webbrowser.open(url)
+    if args.navegador:
+        server, thread, url = start_server()
+        print(f"{APP_NAME} {__version__} em {url}  (Ctrl+C para fechar)")
+        webbrowser.open(url)
+        try:
             while thread.is_alive():
                 time.sleep(0.5)
-        else:
-            try:
-                open_window(url)
-            except Exception as exc:  # noqa: BLE001 — sem WebView2: usa o navegador
-                print(f"Janela indisponível ({exc}); abrindo no navegador", file=sys.stderr)
-                webbrowser.open(url)
-                message("O Nexos ERP abriu no seu navegador.\n\nQuando terminar de usar, clique em OK para fechar o programa.")
-    except KeyboardInterrupt:
-        pass
-    finally:
+        except KeyboardInterrupt:
+            pass
+        server.should_exit = True
+        return
+
+    try:
+        state = open_desktop(args)
+    except Exception as exc:  # noqa: BLE001 — sem WebView2: usa o navegador
+        print(f"Janela indisponível ({exc}); abrindo no navegador", file=sys.stderr)
+        server, thread, url = start_server()
+        webbrowser.open(url)
+        message("O Nexos ERP abriu no seu navegador.\n\nQuando terminar de usar, clique em OK para fechar o programa.")
         server.should_exit = True
         thread.join(timeout=5)
+        return
+
+    if "error" in state:
+        message(f"Não consegui abrir o sistema.\n\n{state['error']}\n\nDetalhes em: {folder / 'erp.log'}", error=True)
+    if "server" in state:
+        state["server"].should_exit = True
+        state["thread"].join(timeout=5)
 
 
 if __name__ == "__main__":

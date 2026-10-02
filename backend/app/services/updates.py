@@ -9,7 +9,6 @@ programa aberto), põe o novo no lugar e reabre.
 import json
 import os
 import re
-import shutil
 import sys
 import time
 import urllib.request
@@ -81,9 +80,10 @@ def status(current: str) -> dict:
     }
 
 
-def install(current: str) -> str:
-    """Baixa e troca o .exe. Devolve a versão instalada; o programa precisa reabrir."""
-    release = latest_release(force=True)
+def install(current: str, progress=None, release: dict | None = None) -> str:
+    """Baixa e troca o .exe. Devolve a versão instalada; o programa precisa reabrir.
+    `progress(baixado, total)` é chamado durante o download (para a barra da tela de abertura)."""
+    release = release or latest_release(force=True)
     if not release or parse_version(release["version"]) <= parse_version(current):
         raise UpdateError("Você já está na versão mais nova")
     exe = installed_exe()
@@ -94,7 +94,13 @@ def install(current: str) -> str:
     old = exe.with_name(f"{exe.stem}.old")
     try:
         with _get(release["download_url"], timeout=60) as res, open(new, "wb") as out:
-            shutil.copyfileobj(res, out)
+            total = release["size"] or 0
+            done = 0
+            while chunk := res.read(256 * 1024):
+                out.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
     except OSError as exc:
         new.unlink(missing_ok=True)
         raise UpdateError("Não consegui baixar a versão nova. Confira a internet e tente de novo.") from exc
@@ -124,3 +130,40 @@ def cleanup_previous() -> None:
             exe.with_name(f"{exe.stem}.old").unlink(missing_ok=True)
         except OSError:
             pass  # a versão antiga ainda está fechando; fica para a próxima
+
+
+# --- Atualização ao abrir ------------------------------------------------------------
+
+def _skip_file() -> Path:
+    from ..db import data_dir  # import tardio: data_dir depende de o programa estar rodando
+
+    return data_dir() / "atualizacao-pulada.txt"
+
+
+def startup_release(current: str) -> dict | None:
+    """Versão para instalar sozinho ao abrir, ou None (sem internet, já atualizado,
+    rodando do código-fonte, pasta sem permissão ou versão marcada como problemática)."""
+    exe = installed_exe()
+    if exe is None or not os.access(exe.parent, os.W_OK):
+        return None
+    release = latest_release(force=True)
+    if not release or parse_version(release["version"]) <= parse_version(current):
+        return None
+    try:
+        if _skip_file().read_text(encoding="utf-8").strip() == release["version"]:
+            return None
+    except OSError:
+        pass
+    return release
+
+
+def confirm_update(expected: str, current: str) -> None:
+    """Chamado pela versão nova ao abrir. Se ela não é a versão que a Release prometia
+    (arquivo errado publicado), marca para não baixar de novo em toda abertura."""
+    try:
+        if parse_version(current) < parse_version(expected):
+            _skip_file().write_text(expected, encoding="utf-8")
+        else:
+            _skip_file().unlink(missing_ok=True)
+    except OSError:
+        pass

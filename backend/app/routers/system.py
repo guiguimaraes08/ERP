@@ -33,6 +33,7 @@ def read_settings(conn: sqlite3.Connection = Depends(get_db)):
         "machine_rate": float(s.get("machine_rate", 0)),
         "default_margin": float(s.get("default_margin", 40)),
         "allow_phone": s.get("allow_phone") == "1",
+        "auto_update": s.get("auto_update", "1") == "1",
     }
 
 
