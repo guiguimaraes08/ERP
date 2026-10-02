@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Cores como variáveis: o tema escuro só troca os valores. */
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1efea;
+  --border: #e4e0d8;
+  --text: #1c1917;
+  --muted: #6b645c;
+  --primary: #c2410c;
+  --primary-hover: #9a3412;
+  --primary-fg: #ffffff;
+  --primary-soft: #fff1e8;
+  --success: #15803d;
+  --success-soft: #e7f5ec;
+  --warning: #a16207;
+  --warning-soft: #fdf3dc;
+  --danger: #b91c1c;
+  --danger-soft: #fdecec;
+  --info: #1d4ed8;
+  --info-soft: #e8effd;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #141210;
+  --surface: #1d1a17;
+  --surface-2: #26231f;
+  --border: #36312b;
+  --text: #f3f0ea;
+  --muted: #a39b90;
+  --primary: #fb923c;
+  --primary-hover: #fdba74;
+  --primary-fg: #1c1006;
+  --primary-soft: #3a2414;
+  --success: #4ade80;
+  --success-soft: #15301e;
+  --warning: #fbbf24;
+  --warning-soft: #33270f;
+  --danger: #f87171;
+  --danger-soft: #3a1818;
+  --info: #93b4fd;
+  --info-soft: #1a2440;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-soft: var(--primary-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='number']::-webkit-inner-spin-button {
+  opacity: 0.4;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in {
+    animation: fade-in 140ms ease-out;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}

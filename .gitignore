@@ -5,4 +5,13 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Banco local (os dados de verdade ficam só na máquina)
+data/
+
