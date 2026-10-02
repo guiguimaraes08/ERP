@@ -77,3 +77,21 @@ export function whatsappLink(phone: string | null, text: string): string | null 
   const full = digits.length <= 11 ? `55${digits}` : digits;
   return `https://wa.me/${full}?text=${encodeURIComponent(text)}`;
 }
+
+/** 1.5 → "1h30", 0.25 → "15 min", 8 → "8h" */
+export function hours(h: number): string {
+  const total = Math.round(h * 60);
+  if (total < 60) return `${total} min`;
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return mm ? `${hh}h${String(mm).padStart(2, '0')}` : `${hh}h`;
+}
+
+/** "qua 08/10" */
+export function dayLabel(iso: string | null): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  const day = new Date(y, m - 1, d);
+  const weekday = day.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+  return `${weekday} ${shortDate(iso)}`;
+}

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import FROZEN, ROOT_DIR, auto_backup, init_db
-from .routers import customers, materials, orders, products, system
+from .routers import customers, materials, orders, products, schedule, system
 
 # Dentro do .exe, o PyInstaller descompacta os arquivos em sys._MEIPASS.
 FRONTEND_DIST = (
@@ -22,9 +22,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="ERP Produção Caseira", lifespan=lifespan)
+app = FastAPI(title="Nexos ERP", lifespan=lifespan)
 
-for module in (materials, products, customers, orders, system):
+for module in (materials, products, customers, orders, schedule, system):
     app.include_router(module.router)
 
 

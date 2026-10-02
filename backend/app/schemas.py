@@ -71,6 +71,9 @@ class OrderItemIn(BaseModel):
     product_name: str | None = Field(default=None, max_length=150)
     quantity: float = Field(gt=0)
     unit_price: float | None = Field(default=None, ge=0)
+    # Tempo por unidade. Vazio = o do produto (item avulso: 0).
+    labor_minutes: float | None = Field(default=None, ge=0)
+    machine_minutes: float | None = Field(default=None, ge=0)
 
 
 class OrderIn(BaseModel):
@@ -102,3 +105,38 @@ class SettingsIn(BaseModel):
     machine_rate: float = Field(ge=0)
     default_margin: float = Field(ge=0, lt=95)
     allow_phone: bool = False
+
+
+class WorkerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    # Horas em cada dia: [seg, ter, qua, qui, sex, sáb, dom]
+    weekly_hours: list[float] = Field(min_length=7, max_length=7)
+    active: bool = True
+
+    _clean = field_validator("name")(_strip)
+
+    @field_validator("weekly_hours")
+    @classmethod
+    def _hours_in_day(cls, hours: list[float]) -> list[float]:
+        if any(h < 0 or h > 24 for h in hours):
+            raise ValueError("cada dia precisa ter entre 0 e 24 horas")
+        return hours
+
+
+class WorkerExceptionIn(BaseModel):
+    worker_id: int | None = None  # vazio = vale para todo mundo
+    start_date: date
+    end_date: date | None = None  # vazio = só o dia de início
+    hours: float = Field(default=0, ge=0, le=24)  # 0 = folga
+    note: str = Field(default="", max_length=150)
+
+
+class SchedulePreviewIn(BaseModel):
+    """Pedido ainda não salvo, para perguntar "quando fica pronto?"."""
+    items: list[OrderItemIn] = Field(min_length=1)
+    due_date: date | None = None
+    order_id: int | None = None  # editando um pedido: tira a versão salva da fila
+
+
+class MachineHoursIn(BaseModel):
+    machine_hours_per_day: float = Field(ge=0, le=24 * 20)

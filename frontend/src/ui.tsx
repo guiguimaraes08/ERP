@@ -4,35 +4,109 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
+  useReducer,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from 'react';
-import { api, ApiError } from './api';
+import { flushSync } from 'react-dom';
+import { api, ApiError, onWrite } from './api';
 import type { Tone } from './format';
 
 /* ---------- Carregamento de dados ---------- */
 
+// Cache das telas: ao abrir uma tela, ela aparece na hora com o que já foi
+// carregado e se atualiza por baixo. Por isso a transição desliza a tela pronta,
+// e não um "Carregando…".
+const cache = new Map<string, unknown>();
+const listeners = new Map<string, Set<() => void>>();
+const latest = new Map<string, number>();
+
+function notify(path: string) {
+  listeners.get(path)?.forEach((fn) => fn());
+}
+
+/** Busca de novo e avisa quem está mostrando. Resposta atrasada não sobrescreve uma mais nova. */
+export function refresh(path: string): Promise<void> {
+  const n = (latest.get(path) ?? 0) + 1;
+  latest.set(path, n);
+  return api.get<unknown>(path).then((data) => {
+    if (latest.get(path) !== n) return;
+    cache.set(path, data);
+    notify(path);
+  });
+}
+
+/** Carrega em segundo plano o que ainda não está no cache. */
+export function prefetch(paths: string[]) {
+  for (const p of paths) if (!cache.has(p)) refresh(p).catch(() => {});
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+onWrite(() => {
+  // Depois de gravar algo, tudo o que está no cache pode ter mudado (estoque, agenda, painel…).
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    for (const p of cache.keys()) refresh(p).catch(() => {});
+  }, 120);
+});
+
 export function useLoad<T>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
   const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!path) return;
-    let alive = true;
-    api
-      .get<T>(path)
-      .then((d) => alive && (setData(d), setError(null)))
-      .catch((e: Error) => alive && setError(e.message));
+    const set = listeners.get(path) ?? new Set();
+    listeners.set(path, set);
+    set.add(rerender);
+    refresh(path)
+      .then(() => setError(null))
+      .catch((e: Error) => setError(e.message));
     return () => {
-      alive = false;
+      set.delete(rerender);
     };
-  }, [path, tick]);
+  }, [path]);
 
-  const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, reload, setData };
+  const data = path && cache.has(path) ? (cache.get(path) as T) : null;
+  const reload = useCallback(() => {
+    if (path) refresh(path).catch((e: Error) => setError(e.message));
+  }, [path]);
+  const setData = useCallback(
+    (value: T) => {
+      if (!path) return;
+      cache.set(path, value);
+      notify(path);
+    },
+    [path],
+  );
+  return { data, error: data ? null : error, reload, setData };
+}
+
+/* ---------- Transições ---------- */
+
+export type SlideDirection = 'forward' | 'back' | 'none';
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Troca de tela deslizando: a nova entra pelo lado (direita = avançar, esquerda = voltar)
+ * por cima da antiga, que recua um pouco. Usa a View Transitions API; sem ela, só troca.
+ * `scope` = 'page' (área principal inteira) ou 'tab' (só o conteúdo de uma aba).
+ */
+export function slide(direction: SlideDirection, update: () => void, scope: 'page' | 'tab' = 'page') {
+  if (direction === 'none' || reducedMotion() || !document.startViewTransition) {
+    update();
+    return;
+  }
+  const root = document.documentElement;
+  root.dataset.slide = `${scope}-${direction}`;
+  const transition = document.startViewTransition(() => flushSync(update));
+  transition.finished.finally(() => {
+    if (root.dataset.slide === `${scope}-${direction}`) delete root.dataset.slide;
+  });
 }
 
 /** Campos numéricos guardam texto no formulário; aceita vírgula ("1,5"). */
@@ -154,6 +228,37 @@ export function Loading() {
 
 /* ---------- Janela (modal) ---------- */
 
+/**
+ * Animação de saída: o React tira a janela da tela na hora, então deixamos uma
+ * cópia visual dela (e do fundo escuro) descendo por 200 ms e depois some.
+ * Assim todo jeito de fechar (X, Cancelar, Salvar, Esc) anima igual.
+ */
+function leaveWithGhost(dialog: HTMLDialogElement) {
+  if (reducedMotion() || !dialog.open) return;
+  const rect = dialog.getBoundingClientRect();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ghost-backdrop';
+  const ghost = document.createElement('div');
+  ghost.className = `${dialog.className} sheet-ghost`;
+  ghost.setAttribute('aria-hidden', 'true');
+  Object.assign(ghost.style, {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    margin: '0',
+    zIndex: '60',
+    pointerEvents: 'none',
+  });
+  dialog.childNodes.forEach((child) => ghost.appendChild(child.cloneNode(true)));
+  document.body.append(backdrop, ghost);
+  setTimeout(() => {
+    backdrop.remove();
+    ghost.remove();
+  }, 220);
+}
+
 export function Modal({
   title,
   onClose,
@@ -168,10 +273,13 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
-    return () => dialog?.close();
+    return () => {
+      if (dialog) leaveWithGhost(dialog);
+      dialog?.close();
+    };
   }, []);
 
   return (
@@ -182,7 +290,7 @@ export function Modal({
         onClose();
       }}
       onClick={(e) => e.target === ref.current && onClose()}
-      className={`fade-in m-0 sm:m-auto mt-auto w-full max-w-none sm:max-w-lg ${wide ? 'sm:max-w-3xl' : ''} max-h-[92vh] sm:max-h-[88vh] overflow-hidden rounded-t-2xl sm:rounded-2xl bg-surface text-ink border border-line p-0 shadow-2xl`}
+      className={`sheet m-0 sm:m-auto mt-auto w-full max-w-none sm:max-w-lg ${wide ? 'sm:max-w-3xl' : ''} max-h-[92vh] sm:max-h-[88vh] overflow-hidden rounded-t-2xl sm:rounded-2xl bg-surface text-ink border border-line p-0 shadow-2xl`}
     >
       <div className="flex flex-col max-h-[92vh] sm:max-h-[88vh]">
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
@@ -274,7 +382,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`fade-in rounded-lg px-4 py-3 text-sm font-medium shadow-lg border ${
+            className={`toast-in rounded-lg px-4 py-3 text-sm font-medium shadow-lg border ${
               t.tone === 'danger' ? 'bg-danger-soft text-danger border-danger/30' : 'bg-surface text-ink border-line'
             }`}
           >

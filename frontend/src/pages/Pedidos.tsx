@@ -1,11 +1,12 @@
 import { ClipboardList, MessageCircle, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, type Order, type OrderStatus, type Shortage } from '../api';
-import { amount, money, NEXT_STEP, qty, relativeDue, shortDate, STATUS, todayIso, whatsappLink } from '../format';
+import { amount, dayLabel, money, NEXT_STEP, qty, relativeDue, shortDate, STATUS, todayIso, whatsappLink } from '../format';
 import {
   Badge, Button, Card, EmptyState, ErrorBox, Field, inputCls, Loading, Modal, PageHeader,
   toNum, useFeedback, useLoad,
 } from '../ui';
+import { forecastBadge } from './Agenda';
 import PedidoForm from './PedidoForm';
 
 const FILTERS: { id: string; label: string }[] = [
@@ -164,6 +165,11 @@ export default function Pedidos({ initialStatus, openId }: { initialStatus: stri
                   <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-line">
                     <span className={`text-sm ${o.late ? 'text-danger font-semibold' : 'text-muted'}`}>
                       {o.late ? 'Atrasado · ' : ''}{relativeDue(o.due_date)}
+                      {o.forecast?.finish_date && !o.late && (
+                        <span className={o.forecast.late ? 'text-danger font-medium' : ''}>
+                          {' · '}fica pronto {dayLabel(o.forecast.finish_date)}{o.forecast.late ? ' (vai atrasar)' : ''}
+                        </span>
+                      )}
                       {o.shortages.length > 0 && <span className="text-warning font-medium"> · falta material</span>}
                     </span>
                     {step && (
@@ -314,6 +320,20 @@ function OrderDetail({ id, onClose, onChanged, onEdit }: { id: number; onClose: 
             </select>
           </div>
         </div>
+
+        {order.forecast && (
+          <a
+            href="#/agenda"
+            className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm ${order.forecast.late ? 'bg-danger-soft text-danger' : 'bg-info-soft text-info'}`}
+          >
+            <span>
+              {order.forecast.finish_date
+                ? <>Pela agenda, fica pronto <b>{dayLabel(order.forecast.finish_date)}</b></>
+                : 'Sem previsão: cadastre os horários de trabalho na Agenda'}
+            </span>
+            <span className="font-semibold whitespace-nowrap">{forecastBadge(order.forecast).label}</span>
+          </a>
+        )}
 
         {order.shortages.length > 0 && (
           <ShortageList shortages={order.shortages} intro="Atenção: para começar este pedido falta material." />

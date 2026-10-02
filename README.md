@@ -6,6 +6,9 @@ Controle de produção para quem fabrica em casa: impressão 3D, cordões, chave
 - **Estoque**: cadastre o insumo dizendo "paguei R$ 110 por 1000 g"; o sistema calcula o custo por grama. Cada compra atualiza o custo médio.
 - **Produtos**: monte a receita uma vez (insumos + minutos de trabalho + minutos de máquina). O sistema mostra o custo e **sugere o preço**.
 - **Pedidos**: cliente, itens, prazo, pagamentos (sinal, parcial, total) e botão de WhatsApp. O material sai do estoque quando você **começa** o pedido e volta se cancelar.
+- **Agenda**: diga quem trabalha e quantas horas em cada dia (ex.: seg–sex 8h, sábado 4h) e as folgas. O sistema monta a
+  fila pelos prazos e mostra quando cada pedido fica pronto, o que vai atrasar e quanto do dia está livre. Ao anotar um
+  pedido ele já diz "fica pronto por volta de qua 08/10" e sugere um prazo seguro para combinar com o cliente.
 - **Início**: o que está atrasado, o que vence em 3 dias, quanto tem a receber, quanto entrou no mês e o que vai faltar de material.
 
 ---
@@ -106,12 +109,13 @@ backend/app/
   services/pricing.py  custo do produto e preço sugerido
   services/stock.py    baixa, estorno e falta de material
   services/updates.py  atualização automática pelas Releases do GitHub
+  services/schedule.py agenda: horas por dia, fila de pedidos e previsão de entrega
   routers/             materials, products, orders, customers, system
   seed.py              dados de exemplo
 backend/tests/         regras de negócio (estoque, preço, pagamento, backup)
 frontend/src/
   api.ts  format.ts  ui.tsx
-  pages/               Início, Pedidos, Produtos, Estoque, Clientes, Ajustes
+  pages/               Início, Pedidos, Agenda, Produtos, Estoque, Clientes, Ajustes
 ```
 
 ### Regras que valem a pena saber
@@ -121,4 +125,8 @@ frontend/src/
 - **Estoque** baixa uma vez só (ao entrar em "Fazendo", "Pronto" ou "Entregue"). Voltar para "A fazer", cancelar ou excluir devolve exatamente o que saiu.
 - **Falta de material** bloqueia o início do pedido, mas dá para seguir assim mesmo (o estoque fica negativo até contar/ajustar).
 - **Vendido no mês** conta só pedidos entregues; **recebido** conta só pagamentos registrados.
+- **Agenda**: a fila tem primeiro os pedidos "fazendo", depois o prazo mais perto (sem prazo vai para o fim). As horas de
+  cada dia (soma das pessoas, com folgas e exceções) vão sendo gastas na ordem da fila; hoje conta inteiro. As máquinas,
+  se configuradas, têm fila própria em paralelo, e o pedido fica pronto quando as duas partes acabam. O tempo vem dos
+  minutos de trabalho/máquina do produto, congelados no pedido. Pedido "fazendo" conta como se faltasse ele inteiro.
 - Insumos e produtos são **arquivados**, não apagados, para o histórico continuar fazendo sentido.

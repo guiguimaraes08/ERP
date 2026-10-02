@@ -52,6 +52,10 @@ def seed_demo(conn: sqlite3.Connection) -> None:
             [(cur.lastrowid, material_ids[i], q) for i, q in recipe],
         )
 
+    # Quem trabalha: seg a sex 6h, sábado 4h. Uma impressora rodando até 18h por dia.
+    conn.execute("INSERT INTO workers (name, weekly_hours) VALUES ('Eu', '[6, 6, 6, 6, 6, 4, 0]')")
+    conn.execute("UPDATE settings SET value = '18' WHERE key = 'machine_hours_per_day'")
+
     customers = []
     for name, phone in [
         ("Ana Souza", "11987654321"),
@@ -81,9 +85,11 @@ def seed_demo(conn: sqlite3.Connection) -> None:
             b = pricing.product_breakdown(conn, product)
             recipe = [{"material_id": m, "quantity": q} for m, q in pricing.product_recipe(conn, product["id"])]
             conn.execute(
-                """INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, unit_cost, recipe_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (order_id, product["id"], product["name"], qty, b.price, b.unit_cost, json.dumps(recipe)),
+                """INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, unit_cost,
+                                            recipe_json, labor_minutes, machine_minutes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (order_id, product["id"], product["name"], qty, b.price, b.unit_cost, json.dumps(recipe),
+                 product["labor_minutes"], product["machine_minutes"]),
             )
             total += qty * b.price
         if status != "a_fazer":

@@ -148,8 +148,9 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
--- Itens guardam uma "foto" do produto no momento do pedido: se o preço ou a
--- receita mudarem depois, o pedido antigo continua com os números dele.
+-- Itens guardam uma "foto" do produto no momento do pedido: se o preço, a
+-- receita ou o tempo (labor/machine_minutes, por unidade, usados pela agenda)
+-- mudarem depois, o pedido antigo continua com os números dele.
 CREATE TABLE IF NOT EXISTS order_items (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -158,7 +159,29 @@ CREATE TABLE IF NOT EXISTS order_items (
     quantity     REAL NOT NULL CHECK (quantity > 0),
     unit_price   REAL NOT NULL CHECK (unit_price >= 0),
     unit_cost    REAL NOT NULL DEFAULT 0,
-    recipe_json  TEXT NOT NULL DEFAULT '[]'
+    recipe_json  TEXT NOT NULL DEFAULT '[]',
+    labor_minutes   REAL NOT NULL DEFAULT 0,
+    machine_minutes REAL NOT NULL DEFAULT 0
+);
+
+-- Quem trabalha e quantas horas em cada dia da semana: JSON [seg, ter, qua, qui, sex, sáb, dom].
+CREATE TABLE IF NOT EXISTS workers (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    weekly_hours TEXT NOT NULL DEFAULT '[8, 8, 8, 8, 8, 0, 0]',
+    active       INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Folgas, feriados e dias com horário diferente. hours = 0 é folga.
+CREATE TABLE IF NOT EXISTS worker_exceptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id  INTEGER REFERENCES workers(id) ON DELETE CASCADE,  -- vazio = todo mundo (feriado)
+    start_date TEXT NOT NULL,
+    end_date   TEXT NOT NULL,
+    hours      REAL NOT NULL CHECK (hours >= 0 AND hours <= 24),
+    note       TEXT NOT NULL DEFAULT '',
+    CHECK (end_date >= start_date)
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -181,7 +204,22 @@ DEFAULT_SETTINGS = {
     "machine_rate": "2",      # R$ por hora de máquina (energia + desgaste)
     "default_margin": "40",   # % de margem sobre o preço de venda
     "allow_phone": "0",       # 1 = aceita acesso pelo celular na rede de casa
+    "machine_hours_per_day": "0",  # quantas horas as máquinas rodam por dia (0 = não considerar)
 }
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Ajustes em bancos criados por versões anteriores."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(order_items)")}
+    if "labor_minutes" not in cols:  # 2.1: tempo por item, para a agenda
+        conn.execute("ALTER TABLE order_items ADD COLUMN labor_minutes REAL NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE order_items ADD COLUMN machine_minutes REAL NOT NULL DEFAULT 0")
+        conn.execute(
+            """UPDATE order_items SET
+                   labor_minutes = COALESCE((SELECT labor_minutes FROM products p WHERE p.id = order_items.product_id), 0),
+                   machine_minutes = COALESCE((SELECT machine_minutes FROM products p WHERE p.id = order_items.product_id), 0)
+               WHERE product_id IS NOT NULL"""
+        )
 
 
 def connect() -> sqlite3.Connection:
@@ -199,6 +237,7 @@ def init_db() -> None:
     try:
         with conn:
             conn.executescript(SCHEMA)
+            _migrate(conn)
             conn.executemany(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 DEFAULT_SETTINGS.items(),

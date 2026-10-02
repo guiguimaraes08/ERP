@@ -1,8 +1,8 @@
-import { AlertTriangle, ArrowRight, CalendarClock, PackageX, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarClock, CalendarDays, Clock, PackageX, Sparkles } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { go } from '../App';
 import { api, type Dashboard, type OrderBrief, type Settings } from '../api';
-import { amount, money, relativeDue, STATUS } from '../format';
+import { amount, dayLabel, money, relativeDue, STATUS } from '../format';
 import { Badge, Button, Card, ErrorBox, Loading, useFeedback, useLoad } from '../ui';
 
 export default function Inicio({ settings }: { settings: Settings | null }) {
@@ -51,6 +51,43 @@ export default function Inicio({ settings }: { settings: Settings | null }) {
               <Sparkles className="w-4 h-4" /> Ver com dados de exemplo
             </Button>
           </div>
+        </Card>
+      )}
+
+      {!data.is_empty && !data.has_workers && (
+        <a href="#/agenda?aba=horarios" className="flex items-center gap-3 rounded-xl border border-info/30 bg-info-soft px-4 py-3 text-info">
+          <Clock className="w-5 h-5 shrink-0" />
+          <span className="flex-1 text-sm">
+            <b>Novo: Agenda.</b> Diga quantas horas por dia você trabalha e o sistema mostra quando cada pedido fica pronto.
+          </span>
+          <ArrowRight className="w-4 h-4 shrink-0" />
+        </a>
+      )}
+
+      {data.will_be_late.length > 0 && (
+        <Card className="p-4 border-danger/40">
+          <h3 className="font-semibold flex items-center justify-between gap-2 mb-3">
+            <span className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-danger" /> Pela agenda, vão atrasar</span>
+            <a href="#/agenda" className="text-sm text-primary font-medium">Ver agenda</a>
+          </h3>
+          <ul className="divide-y divide-line">
+            {data.will_be_late.map((j) => (
+              <li key={j.order_id}>
+                <a href={`#/pedidos?id=${j.order_id}`} className="py-2 flex items-center justify-between gap-3 text-sm hover:text-primary">
+                  <span className="min-w-0">
+                    <span className="font-medium">#{j.order_id} {j.customer ?? 'Sem cliente'}</span>
+                    <span className="block text-muted truncate">{j.items.join(', ')}</span>
+                  </span>
+                  <span className="text-right shrink-0">
+                    <span className="block text-danger font-medium">
+                      {j.finish_date ? `pronto ${dayLabel(j.finish_date)}` : 'sem previsão'}
+                    </span>
+                    <span className="block text-xs text-muted">prazo {dayLabel(j.due_date)}</span>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
 

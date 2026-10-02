@@ -84,6 +84,8 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   unit_cost: number;
+  labor_minutes: number;
+  machine_minutes: number;
 }
 
 export interface Payment {
@@ -124,6 +126,7 @@ export interface Order {
   balance: number;
   late: boolean;
   shortages: Shortage[];
+  forecast?: ScheduleJob | null;
 }
 
 export interface OrderInput {
@@ -133,7 +136,13 @@ export interface OrderInput {
   due_date: string | null;
   notes: string;
   discount: number;
-  items: { product_id: number | null; product_name?: string; quantity: number; unit_price: number | null }[];
+  items: {
+    product_id: number | null;
+    product_name?: string;
+    quantity: number;
+    unit_price: number | null;
+    labor_minutes?: number | null;
+  }[];
   force?: boolean;
 }
 
@@ -189,7 +198,71 @@ export interface Dashboard {
   delivered_month: number;
   shortages: Shortage[];
   low_stock: { id: number; name: string; unit: Unit; stock: number; min_stock: number }[];
+  will_be_late: ScheduleJob[];
+  has_workers: boolean;
   is_empty: boolean;
+}
+
+/* ---------- Agenda ---------- */
+
+export interface Worker {
+  id: number;
+  name: string;
+  /** Horas em cada dia: [seg, ter, qua, qui, sex, sáb, dom] */
+  weekly_hours: number[];
+  active: boolean;
+  week_total: number;
+}
+
+export interface WorkerException {
+  id: number;
+  worker_id: number | null;
+  worker_name: string | null;
+  start_date: string;
+  end_date: string;
+  hours: number;
+  note: string;
+}
+
+export interface ScheduleJob {
+  order_id: number | null;
+  customer: string | null;
+  items: string[];
+  status: OrderStatus;
+  due_date: string | null;
+  labor_hours: number;
+  machine_hours: number;
+  start_date: string | null;
+  finish_date: string | null;
+  no_forecast: boolean;
+  no_time: boolean;
+  slack_days: number | null;
+  late: boolean;
+}
+
+export interface ScheduleDay {
+  date: string;
+  weekday: string;
+  capacity: number;
+  used: number;
+  people: { name: string; hours: number }[];
+  orders: { order_id: number | null; customer: string | null; hours: number }[];
+}
+
+export interface Schedule {
+  today: string;
+  jobs: ScheduleJob[];
+  days: ScheduleDay[];
+  machine_hours_per_day: number;
+  has_capacity: boolean;
+  summary: { orders: number; labor_hours: number; all_done: string | null; late: number };
+}
+
+export interface SchedulePreview extends ScheduleJob {
+  has_capacity: boolean;
+  /** Fica pronto até aqui sem atrasar ninguém (pedido no fim da fila). */
+  safe_date: string | null;
+  pushes_late: { order_id: number; customer: string | null; due_date: string | null; finish_date: string | null }[];
 }
 
 /** Erro da API com a mensagem já em português e, se houver, a lista do que falta. */
@@ -230,13 +303,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     throw new ApiError('Não consegui falar com o servidor. Ele está rodando?', 0);
   }
-  if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => null);
+  const data = res.status === 204 ? undefined : await res.json().catch(() => null);
   if (!res.ok) {
     const { message, shortages } = describe(data?.detail);
     throw new ApiError(message, res.status, shortages);
   }
+  // Algo foi gravado: as telas em cache precisam se atualizar. Simulações não gravam nada.
+  if (method !== 'GET' && !path.endsWith('/preview')) afterWrite?.();
   return data as T;
+}
+
+let afterWrite: (() => void) | null = null;
+
+/** Chamado depois de toda gravação bem-sucedida (o cache de telas usa para se atualizar). */
+export function onWrite(fn: () => void) {
+  afterWrite = fn;
 }
 
 export const api = {

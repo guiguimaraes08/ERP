@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..db import get_db
 from ..schemas import OrderIn, PaymentIn, StatusIn
-from ..services import pricing, stock
+from ..services import pricing, schedule, stock
 
 router = APIRouter(prefix="/api/orders", tags=["pedidos"])
 
@@ -102,15 +102,22 @@ def _write_items(conn: sqlite3.Connection, order_id: int, body: OrderIn) -> None
             name = item.product_name or product["name"]
             unit_price = item.unit_price if item.unit_price is not None else breakdown.price
             unit_cost = breakdown.unit_cost
+            labor, machine = product["labor_minutes"], product["machine_minutes"]
         else:
             if not item.product_name or item.unit_price is None:
                 raise HTTPException(422, "Item avulso precisa de nome e preço")
             name, unit_price, unit_cost, recipe = item.product_name, item.unit_price, 0.0, []
+            labor = machine = 0.0
+        if item.labor_minutes is not None:
+            labor = item.labor_minutes
+        if item.machine_minutes is not None:
+            machine = item.machine_minutes
 
         conn.execute(
-            """INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, unit_cost, recipe_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (order_id, item.product_id, name, item.quantity, unit_price, unit_cost, json.dumps(recipe)),
+            """INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, unit_cost,
+                                        recipe_json, labor_minutes, machine_minutes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (order_id, item.product_id, name, item.quantity, unit_price, unit_cost, json.dumps(recipe), labor, machine),
         )
 
 
@@ -125,12 +132,16 @@ def list_orders(status: str | None = None, conn: sqlite3.Connection = Depends(ge
         query, params = "SELECT id FROM orders", ()
     # Abertos primeiro pelo prazo mais próximo; sem prazo vão para o fim.
     query += " ORDER BY due_date IS NULL, due_date, id DESC"
-    return [order_summary(conn, r["id"]) for r in conn.execute(query, params).fetchall()]
+    forecast = schedule.forecast_by_order(conn)
+    return [
+        order_summary(conn, r["id"]) | {"forecast": forecast.get(r["id"])}
+        for r in conn.execute(query, params).fetchall()
+    ]
 
 
 @router.get("/{order_id}")
 def get_order(order_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    return order_summary(conn, order_id)
+    return order_summary(conn, order_id) | {"forecast": schedule.forecast_by_order(conn).get(order_id)}
 
 
 @router.post("", status_code=201)

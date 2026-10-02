@@ -18,7 +18,7 @@ from .. import __version__
 from ..db import copy_database, data_dir, db_path, get_db, is_valid_backup
 from ..schemas import SettingsIn
 from ..seed import seed_demo
-from ..services import pricing, stock, updates
+from ..services import pricing, schedule, stock, updates
 from .orders import order_summary
 
 router = APIRouter(prefix="/api", tags=["sistema"])
@@ -98,6 +98,12 @@ def dashboard(conn: sqlite3.Connection = Depends(get_db)):
         "delivered_month": len(delivered_month),
         "shortages": stock.shortages_for(conn, dict(needs)),
         "low_stock": [dict(r) for r in low_stock],
+        # Pela agenda: vão passar do prazo (os que já passaram estão em "late").
+        "will_be_late": [
+            j for j in schedule.simulate(conn)["jobs"]
+            if j["late"] and j["order_id"] is not None and (j["due_date"] or "9999") >= today.isoformat()
+        ],
+        "has_workers": conn.execute("SELECT 1 FROM workers WHERE active = 1").fetchone() is not None,
         "is_empty": conn.execute(
             "SELECT (SELECT COUNT(*) FROM materials) + (SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM orders) AS n"
         ).fetchone()["n"] == 0,
