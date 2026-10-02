@@ -173,7 +173,13 @@ export interface UpdateStatus {
 /** Existe quando a tela roda dentro da janela do programa (.exe). */
 declare global {
   interface Window {
-    pywebview?: { api: { save_backup: () => Promise<string | null>; restart: () => Promise<void> } };
+    pywebview?: {
+      api: {
+        save_backup: () => Promise<string | null>;
+        restart: () => Promise<void>;
+        set_title_bar: (dark: boolean) => Promise<void>;
+      };
+    };
   }
 }
 

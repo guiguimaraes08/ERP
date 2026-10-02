@@ -18,6 +18,8 @@ Controle de produção para quem fabrica em casa: impressão 3D, cordões, chave
 
 ## Para quem vai usar
 
+O passo a passo completo, com exemplos e as vantagens conferidas, está em **docs/Manual do Nexos ERP.pdf**.
+
 1. Baixe o instalador: **https://github.com/guiguimaraes08/ERP/releases/latest/download/Instalar-Nexos-ERP.exe**
 2. Dê dois cliques e vá em **Avançar** até o fim. Ele baixa a versão mais nova e cria o ícone na Área de Trabalho.
 3. Para usar, clique no ícone **Nexos ERP**. Para fechar, feche a janela, como qualquer programa.

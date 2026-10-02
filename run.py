@@ -85,9 +85,13 @@ def single_instance(wait: float) -> bool:
     kernel32.CreateMutexW.restype = wintypes.HANDLE
     kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    # Uma trava por pasta de dados: o uso normal tem uma só; testes com ERP_DATA_DIR não se misturam.
+    import hashlib
+
+    name = "Local\\NexosERP-" + hashlib.sha1(str(data_dir()).lower().encode()).hexdigest()[:12]
     deadline = time.time() + wait
     while True:
-        handle = kernel32.CreateMutexW(None, False, "Local\\NexosERP")
+        handle = kernel32.CreateMutexW(None, False, name)
         if kernel32.GetLastError() != 183:  # 183 = ERROR_ALREADY_EXISTS: outra cópia aberta
             _instance_lock = handle  # fica aberto enquanto o programa roda
             return True
@@ -95,6 +99,68 @@ def single_instance(wait: float) -> bool:
         if time.time() >= deadline:
             return False
         time.sleep(0.3)
+
+
+def centered(width: int, height: int) -> tuple[int, int, int | None, int | None]:
+    """Tamanho e posição para a janela abrir no meio da tela (e caber em tela pequena)."""
+    try:
+        import webview
+
+        screen = webview.screens[0]
+        sw, sh = screen.width, screen.height
+        sx, sy = getattr(screen, "x", 0) or 0, getattr(screen, "y", 0) or 0
+    except Exception:  # noqa: BLE001
+        return width, height, None, None
+    taskbar = 48  # a barra de tarefas come um pedaço de baixo
+    w = min(width, int(sw * 0.92))
+    h = min(height, int((sh - taskbar) * 0.92))
+    return w, h, sx + (sw - w) // 2, sy + (sh - taskbar - h) // 2
+
+
+def window_handle(window) -> int | None:
+    """HWND da janela do Windows (para mexer na barra de título)."""
+    try:
+        return int(window.native.Handle.ToInt64())
+    except Exception:  # noqa: BLE001
+        import ctypes
+
+        return ctypes.windll.user32.FindWindowW(None, APP_NAME) or None
+
+
+def style_title_bar(window, dark: bool) -> None:
+    """Barra de título na cor do sistema: escura no tema escuro (Windows 10 e 11).
+    No Windows 11 a cor fica exatamente igual à da tela; no 10, o cinza escuro do próprio Windows."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    hwnd = window_handle(window)
+    if not hwnd:
+        return
+    dwm = ctypes.windll.dwmapi
+    dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+
+    def set_attr(attr: int, value: int) -> bool:
+        v = ctypes.c_int(value)
+        return dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v)) == 0
+
+    # 20 = DWMWA_USE_IMMERSIVE_DARK_MODE (19 nas primeiras versões do Windows 10 que tinham isso)
+    # Obs.: se a pessoa ligou "cor de destaque nas barras de título", o Windows 10 usa essa cor.
+    if not set_attr(20, int(dark)):
+        set_attr(19, int(dark))
+
+    def colorref(hex_color: str) -> int:
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+        return r | (g << 8) | (b << 16)
+
+    # Só Windows 11 (no 10 essas chamadas falham sem efeito): 35 = fundo, 36 = texto, 34 = borda.
+    caption, text = ("#1d1a17", "#f3f0ea") if dark else ("#ffffff", "#1c1917")
+    set_attr(35, colorref(caption))
+    set_attr(36, colorref(text))
+    set_attr(34, colorref(caption))
+    # Redesenha a moldura na hora.
+    ctypes.windll.user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
 
 
 def free_port(host: str) -> int:
@@ -176,6 +242,10 @@ class DesktopApi:
         copy_database(target)
         return str(target)
 
+    def set_title_bar(self, dark: bool) -> None:
+        """A tela avisa quando o tema muda; a barra de título acompanha."""
+        style_title_bar(self._window, bool(dark))
+
     def restart(self) -> None:
         """Atualização pelo botão da faixa: abre o .exe novo e fecha este."""
         launch_new_version()
@@ -231,9 +301,10 @@ def boot(splash, api: DesktopApi, args, state: dict) -> None:
     state["server"], state["thread"] = server, thread
 
     # 3. Janela principal: carrega escondida, aparece pronta.
+    width, height, x, y = centered(1280, 860)
     main = webview.create_window(
-        APP_NAME, f"{url}/?desktop=1", js_api=api, width=1200, height=820,
-        min_size=(380, 560), text_select=True, hidden=True,
+        APP_NAME, f"{url}/?desktop=1", js_api=api, width=width, height=height, x=x, y=y,
+        min_size=(380, 560), text_select=True, hidden=True, background_color="#141210",
     )
     api._window = main
     main.events.loaded.wait(20)
@@ -247,6 +318,11 @@ def boot(splash, api: DesktopApi, args, state: dict) -> None:
         pass
     time.sleep(0.38)
     main.show()
+    try:  # tema inicial; depois a tela avisa a cada troca (set_title_bar)
+        dark = main.evaluate_js("document.documentElement.classList.contains('dark')")
+        style_title_bar(main, bool(dark))
+    except Exception:  # noqa: BLE001
+        pass
     try:
         main.evaluate_js("window.__nexosReveal && window.__nexosReveal()")
     except Exception:  # noqa: BLE001
@@ -263,8 +339,9 @@ def open_desktop(args) -> dict:
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True  # WhatsApp abre no navegador
+    _, _, sx, sy = centered(720, 420)
     splash = webview.create_window(
-        f"{APP_NAME} · abrindo", html=splash_html(__version__), width=720, height=420,
+        f"{APP_NAME} · abrindo", html=splash_html(__version__), width=720, height=420, x=sx, y=sy,
         frameless=True, easy_drag=True, resizable=False, background_color="#0c0b0a",
     )
     state: dict = {}
